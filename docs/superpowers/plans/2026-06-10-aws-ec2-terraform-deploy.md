@@ -831,7 +831,7 @@ Expected: Token scopes에 `workflow` 포함
 ```bash
 cd /Users/gunbos/Documents/Codex/2026-06-01/new-chat/outputs/kkoma-slack
 SECRET=$(grep '^SLACK_SIGNING_SECRET=' .env | cut -d= -f2-)
-aws ssm put-parameter --region ap-northeast-2 \
+aws ssm put-parameter --profile personal --region ap-northeast-2 \
   --name /kkoma-slack/slack-signing-secret \
   --type SecureString --value "$SECRET" --overwrite
 ```
@@ -857,6 +857,7 @@ terraform {
     key          = "global/tf-state/terraform.tfstate"
     region       = "ap-northeast-2"
     use_lockfile = true
+    profile      = "personal"
   }
 }
 ```
@@ -906,14 +907,14 @@ Expected: `Created repository gunb0s/aws-infra` + push 완료
 
 ```bash
 INSTANCE_ID=$(cd ~/aws-infra/kkoma-slack && terraform output -raw instance_id)
-aws ssm send-command --region ap-northeast-2 \
+aws ssm send-command --profile personal --region ap-northeast-2 \
   --document-name AWS-RunShellScript \
   --instance-ids "$INSTANCE_ID" \
   --parameters 'commands=["test -x /opt/kkoma/deploy.sh && test -f /opt/kkoma/.env && echo READY"]' \
   --query Command.CommandId --output text
 ```
 
-몇 초 후 `aws ssm get-command-invocation --region ap-northeast-2 --command-id <위 출력> --instance-id "$INSTANCE_ID" --query StandardOutputContent --output text`
+몇 초 후 `aws ssm get-command-invocation --profile personal --region ap-northeast-2 --command-id <위 출력> --instance-id "$INSTANCE_ID" --query StandardOutputContent --output text`
 Expected: `READY` (SSM Agent 부팅에 1~2분 걸릴 수 있으니 실패 시 잠시 후 재시도)
 
 ---
