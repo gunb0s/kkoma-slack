@@ -13,7 +13,7 @@ from .semantle_engine import EngineError, MissingDataError, UnknownWordError
 from .storage import StateStore, StoredGuess
 
 
-TOP_LIMIT = 20
+TOP_LIMIT = 10
 OUT_OF_RANK = "1000위 이상"
 NEAR_BUT_UNRANKED = "🔥 후보엔 없지만 가까워요"
 _cutoff_cache: dict[int, float] = {}

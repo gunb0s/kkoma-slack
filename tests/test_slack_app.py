@@ -73,7 +73,7 @@ class SlackAppTest(unittest.TestCase):
             self.assertIn("<@U1>", response["text"])
             self.assertEqual(store.guess_count("T1", "C1", 10), 1)
 
-    def test_top_renders_twenty_entries(self):
+    def test_top_renders_ten_entries(self):
         with TemporaryDirectory() as tmpdir:
             store = StateStore(Path(tmpdir) / "state.db")
             engine = FakeEngine()
@@ -95,10 +95,10 @@ class SlackAppTest(unittest.TestCase):
                 store,
             )
 
-            self.assertIn("TOP 20", response["text"])
+            self.assertIn("TOP 10", response["text"])
             self.assertIn("총 25개 추측", response["text"])
-            self.assertIn("20. `단어19`", response["text"])
-            self.assertNotIn("21. `단어20`", response["text"])
+            self.assertIn("10. `단어9`", response["text"])
+            self.assertNotIn("11. `단어10`", response["text"])
 
     def test_hint_is_stored_per_level(self):
         with TemporaryDirectory() as tmpdir:
