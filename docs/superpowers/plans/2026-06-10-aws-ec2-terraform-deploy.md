@@ -17,6 +17,7 @@
 - deploy role 이름(고정): `kkoma-slack-deploy`
 - SSM 파라미터: `/kkoma-slack/slack-signing-secret`
 - EC2 태그: `App=kkoma-slack` (SSM send-command 타게팅 기준)
+- Terraform state 버킷: `aws-infra-tfstate-438682940251` (S3 백엔드, `use_lockfile` 네이티브 잠금, Terraform 1.10+ 필요)
 
 ---
 
@@ -34,6 +35,8 @@ tests/test_slack_app.py          # 수정: fail-closed 테스트 추가
 **인프라 저장소 (`~/aws-infra`, 신규):**
 ```
 .gitignore                       # tfstate, .terraform 제외
+global/tf-state/main.tf          # state용 S3 버킷 (bootstrap)
+global/tf-state/backend.tf       # bootstrap apply 후 추가 (state를 S3로 migrate)
 global/github-oidc/main.tf       # GitHub OIDC provider (계정당 1개)
 kkoma-slack/versions.tf          # terraform/provider 버전
 kkoma-slack/variables.tf         # region, instance_type 등
@@ -215,16 +218,28 @@ git commit -m "feat: ECR 빌드 푸시 후 SSM으로 EC2 재배포하는 deploy 
 
 ---
 
-### Task 3: `~/aws-infra` 저장소 + global/github-oidc 스택
+### Task 3: `~/aws-infra` 저장소 + tf-state/github-oidc 스택
 
 **Files:**
 - Create: `~/aws-infra/.gitignore`
+- Create: `~/aws-infra/global/tf-state/main.tf`
 - Create: `~/aws-infra/global/github-oidc/main.tf`
+
+- [ ] **Step 0: Terraform 1.10+ 업그레이드**
+
+brew core 포뮬러는 라이선스 변경으로 1.5.7에서 동결됐다. hashicorp tap으로 교체:
+
+```bash
+brew unlink terraform 2>/dev/null; brew install hashicorp/tap/terraform
+terraform version
+```
+
+Expected: `Terraform v1.1x.x` (>= 1.10)
 
 - [ ] **Step 1: 저장소 초기화와 .gitignore**
 
 ```bash
-mkdir -p ~/aws-infra/global/github-oidc ~/aws-infra/kkoma-slack
+mkdir -p ~/aws-infra/global/tf-state ~/aws-infra/global/github-oidc ~/aws-infra/kkoma-slack
 cd ~/aws-infra && git init -b main
 ```
 
@@ -242,18 +257,63 @@ override.tf.json
 *_override.tf.json
 ```
 
-- [ ] **Step 2: OIDC provider 스택 작성**
+- [ ] **Step 2: tf-state 스택 작성 (bootstrap)**
 
-`~/aws-infra/global/github-oidc/main.tf`:
+`~/aws-infra/global/tf-state/main.tf` — backend 블록은 일부러 없음 (버킷 생성 후 Task 6에서 추가하고 migrate):
 
 ```hcl
 terraform {
-  required_version = ">= 1.5"
+  required_version = ">= 1.10"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+  }
+}
+
+provider "aws" {
+  region = "ap-northeast-2"
+}
+
+resource "aws_s3_bucket" "tfstate" {
+  bucket = "aws-infra-tfstate-438682940251"
+}
+
+resource "aws_s3_bucket_versioning" "tfstate" {
+  bucket = aws_s3_bucket.tfstate.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "tfstate" {
+  bucket                  = aws_s3_bucket.tfstate.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+```
+
+- [ ] **Step 3: OIDC provider 스택 작성**
+
+`~/aws-infra/global/github-oidc/main.tf`:
+
+```hcl
+terraform {
+  required_version = ">= 1.10"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+  backend "s3" {
+    bucket       = "aws-infra-tfstate-438682940251"
+    key          = "global/github-oidc/terraform.tfstate"
+    region       = "ap-northeast-2"
+    use_lockfile = true
   }
 }
 
@@ -275,17 +335,21 @@ output "provider_arn" {
 }
 ```
 
-- [ ] **Step 3: 검증**
+- [ ] **Step 4: 검증**
 
-Run: `cd ~/aws-infra/global/github-oidc && terraform init -backend=false && terraform validate`
-Expected: `Success! The configuration is valid.`
+```bash
+cd ~/aws-infra/global/tf-state && terraform init -backend=false && terraform validate
+cd ~/aws-infra/global/github-oidc && terraform init -backend=false && terraform validate
+```
 
-- [ ] **Step 4: Commit**
+Expected: 둘 다 `Success! The configuration is valid.`
+
+- [ ] **Step 5: Commit**
 
 ```bash
 cd ~/aws-infra
-git add .gitignore global/github-oidc/main.tf
-git commit -m "feat: GitHub Actions OIDC provider 스택 추가"
+git add .gitignore global/
+git commit -m "feat: tf-state 버킷과 GitHub OIDC provider 스택 추가"
 ```
 
 ---
@@ -309,12 +373,18 @@ git commit -m "feat: GitHub Actions OIDC provider 스택 추가"
 
 ```hcl
 terraform {
-  required_version = ">= 1.5"
+  required_version = ">= 1.10"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+  }
+  backend "s3" {
+    bucket       = "aws-infra-tfstate-438682940251"
+    key          = "kkoma-slack/terraform.tfstate"
+    region       = "ap-northeast-2"
+    use_lockfile = true
   }
 }
 
@@ -768,14 +838,45 @@ aws ssm put-parameter --region ap-northeast-2 \
 
 Expected: `{"Version": 1, ...}`
 
-- [ ] **Step 2: global/github-oidc apply**
+- [ ] **Step 2: tf-state 스택 bootstrap apply (local → S3 migrate)**
+
+```bash
+cd ~/aws-infra/global/tf-state
+terraform init
+terraform apply -auto-approve
+```
+
+Expected: `Apply complete! Resources: 3 added` (버킷, 버전닝, public access block)
+
+이제 자기 state를 방금 만든 버킷으로 이전한다. `~/aws-infra/global/tf-state/backend.tf` 생성:
+
+```hcl
+terraform {
+  backend "s3" {
+    bucket       = "aws-infra-tfstate-438682940251"
+    key          = "global/tf-state/terraform.tfstate"
+    region       = "ap-northeast-2"
+    use_lockfile = true
+  }
+}
+```
+
+```bash
+terraform init -migrate-state -force-copy
+rm -f terraform.tfstate terraform.tfstate.backup
+cd ~/aws-infra && git add global/tf-state/backend.tf && git commit -m "feat: tf-state 스택 state를 S3 백엔드로 이전"
+```
+
+Expected: `Successfully configured the backend "s3"!`
+
+- [ ] **Step 3: global/github-oidc apply**
 
 Run: `cd ~/aws-infra/global/github-oidc && terraform init && terraform apply -auto-approve`
 Expected: `Apply complete! Resources: 1 added` + `provider_arn` 출력
 
 (이미 계정에 OIDC provider가 존재하면 `EntityAlreadyExists` 에러가 난다. 그 경우 `terraform import aws_iam_openid_connect_provider.github arn:aws:iam::438682940251:oidc-provider/token.actions.githubusercontent.com` 후 재-apply.)
 
-- [ ] **Step 3: kkoma-slack 스택 plan 검토 후 apply**
+- [ ] **Step 4: kkoma-slack 스택 plan 검토 후 apply**
 
 ```bash
 cd ~/aws-infra/kkoma-slack
@@ -792,7 +893,7 @@ terraform output api_endpoint
 
 Expected: `Apply complete!` + `https://xxxx.execute-api.ap-northeast-2.amazonaws.com` 형태 출력. 이 시점에는 ECR에 이미지가 없어 컨테이너는 뜨지 않는 게 정상 (deploy.sh가 pull 실패 시 정상 종료).
 
-- [ ] **Step 4: 인프라 저장소 GitHub push**
+- [ ] **Step 5: 인프라 저장소 GitHub push**
 
 ```bash
 cd ~/aws-infra
@@ -801,7 +902,7 @@ gh repo create gunb0s/aws-infra --private --source . --push
 
 Expected: `Created repository gunb0s/aws-infra` + push 완료
 
-- [ ] **Step 5: 인스턴스 user_data 성공 확인**
+- [ ] **Step 6: 인스턴스 user_data 성공 확인**
 
 ```bash
 INSTANCE_ID=$(cd ~/aws-infra/kkoma-slack && terraform output -raw instance_id)
