@@ -33,6 +33,7 @@ class Settings:
     slack_signing_secret: str = os.environ.get("SLACK_SIGNING_SECRET", "")
     public_responses: bool = os.environ.get("KKOMA_PUBLIC_RESPONSES", "1") != "0"
     allow_score_only: bool = os.environ.get("KKOMA_ALLOW_SCORE_ONLY", "0") == "1"
+    allow_unsigned: bool = os.environ.get("KKOMA_ALLOW_UNSIGNED", "0") == "1"
 
 
 settings = Settings()

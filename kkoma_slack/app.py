@@ -2,11 +2,12 @@ from flask import Flask, abort, jsonify, request
 
 from .config import settings
 from .semantle_engine import RemoteSemantleEngine, SelfHostedSemantleEngine
-from .slack_app import handle_slash_command, verify_slack_request
+from .slack_app import ensure_signing_configured, handle_slash_command, verify_slack_request
 from .storage import StateStore
 
 
 def create_app() -> Flask:
+    ensure_signing_configured(settings.slack_signing_secret, settings.allow_unsigned)
     app = Flask(__name__)
     engine = create_engine()
     store = StateStore(settings.state_db_path)

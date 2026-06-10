@@ -3,7 +3,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from kkoma_slack.semantle_engine import GuessResult, TopScore
-from kkoma_slack.slack_app import handle_slash_command
+from kkoma_slack.slack_app import ensure_signing_configured, handle_slash_command
 from kkoma_slack.storage import StateStore
 
 
@@ -158,6 +158,18 @@ class SlackAppTest(unittest.TestCase):
             stored = store.hint("T1", "C1", 10, "medium")
             self.assertIsNotNone(stored)
             self.assertIn("medium", response["text"])
+
+
+class SigningConfigTest(unittest.TestCase):
+    def test_missing_secret_raises(self):
+        with self.assertRaises(RuntimeError):
+            ensure_signing_configured("", allow_unsigned=False)
+
+    def test_secret_set_passes(self):
+        ensure_signing_configured("real-secret", allow_unsigned=False)
+
+    def test_allow_unsigned_bypasses(self):
+        ensure_signing_configured("", allow_unsigned=True)
 
 
 if __name__ == "__main__":

@@ -54,6 +54,14 @@ HELP_TEXT = "\n".join(
 )
 
 
+def ensure_signing_configured(signing_secret: str, allow_unsigned: bool) -> None:
+    if not signing_secret and not allow_unsigned:
+        raise RuntimeError(
+            "SLACK_SIGNING_SECRET is not set. "
+            "Set it, or set KKOMA_ALLOW_UNSIGNED=1 for local development only."
+        )
+
+
 def verify_slack_request(request: Request, signing_secret: str) -> bool:
     if not signing_secret:
         return True
