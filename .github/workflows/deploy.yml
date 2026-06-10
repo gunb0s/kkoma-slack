@@ -14,7 +14,7 @@ concurrency:
 
 env:
   AWS_REGION: ap-northeast-2
-  ECR_REGISTRY: 438682940251.dkr.ecr.ap-northeast-2.amazonaws.com
+  ECR_REGISTRY: 947197405729.dkr.ecr.ap-northeast-2.amazonaws.com
   ECR_REPO: kkoma-slack
 
 jobs:
@@ -25,7 +25,7 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::438682940251:role/kkoma-slack-deploy
+          role-to-assume: arn:aws:iam::947197405729:role/kkoma-slack-deploy
           aws-region: ap-northeast-2
 
       - uses: aws-actions/amazon-ecr-login@v2

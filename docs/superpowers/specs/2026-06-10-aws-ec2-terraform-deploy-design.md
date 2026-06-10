@@ -22,7 +22,7 @@
 | 저장소 구성 | 2개 분리: 앱 저장소(`kkoma-slack`, public) + 인프라 저장소(`~/aws-infra`, AWS 계정 총괄용 신규) |
 | 배포 자동화 | GitHub Actions → ECR push → SSM send-command로 EC2 재배포 |
 | Actions → AWS 인증 | OIDC role (액세스 키 미사용) |
-| Terraform 상태 | S3 백엔드 (`aws-infra-tfstate-438682940251`, 버전닝 + `use_lockfile` 네이티브 잠금). 스택별 key 분리. Terraform 1.10+ 필요 — `hashicorp/tap`으로 업그레이드 (brew core는 1.5.7에서 동결) |
+| Terraform 상태 | S3 백엔드 (`aws-infra-tfstate-947197405729`, 버전닝 + `use_lockfile` 네이티브 잠금). 스택별 key 분리. Terraform 1.10+ 필요 — `hashicorp/tap`으로 업그레이드 (brew core는 1.5.7에서 동결) |
 | 예상 비용 | 최소 지속 비용 월 약 $7.5 (t4g.nano $3.1 + 퍼블릭 IPv4 $3.6 + EBS $0.7). API Gateway 요청, ECR 스토리지, 데이터 전송 등 사용량 기반 소액이 추가될 수 있음 |
 
 ## 런타임 아키텍처

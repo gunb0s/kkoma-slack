@@ -11,13 +11,13 @@
 **스펙:** `docs/superpowers/specs/2026-06-10-aws-ec2-terraform-deploy-design.md`
 
 **고정 값:**
-- AWS 계정: `438682940251`, 리전: `ap-northeast-2`
+- AWS 계정: `947197405729`, 리전: `ap-northeast-2`
 - GitHub 계정: `gunb0s`, 앱 저장소: `gunb0s/kkoma-slack` (public), 인프라 저장소: `gunb0s/aws-infra` (private)
-- ECR 리포지토리: `kkoma-slack` → `438682940251.dkr.ecr.ap-northeast-2.amazonaws.com/kkoma-slack`
+- ECR 리포지토리: `kkoma-slack` → `947197405729.dkr.ecr.ap-northeast-2.amazonaws.com/kkoma-slack`
 - deploy role 이름(고정): `kkoma-slack-deploy`
 - SSM 파라미터: `/kkoma-slack/slack-signing-secret`
 - EC2 태그: `App=kkoma-slack` (SSM send-command 타게팅 기준)
-- Terraform state 버킷: `aws-infra-tfstate-438682940251` (S3 백엔드, `use_lockfile` 네이티브 잠금, Terraform 1.10+ 필요)
+- Terraform state 버킷: `aws-infra-tfstate-947197405729` (S3 백엔드, `use_lockfile` 네이티브 잠금, Terraform 1.10+ 필요)
 
 ---
 
@@ -158,7 +158,7 @@ concurrency:
 
 env:
   AWS_REGION: ap-northeast-2
-  ECR_REGISTRY: 438682940251.dkr.ecr.ap-northeast-2.amazonaws.com
+  ECR_REGISTRY: 947197405729.dkr.ecr.ap-northeast-2.amazonaws.com
   ECR_REPO: kkoma-slack
 
 jobs:
@@ -169,7 +169,7 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::438682940251:role/kkoma-slack-deploy
+          role-to-assume: arn:aws:iam::947197405729:role/kkoma-slack-deploy
           aws-region: ap-northeast-2
 
       - uses: aws-actions/amazon-ecr-login@v2
@@ -277,7 +277,7 @@ provider "aws" {
 }
 
 resource "aws_s3_bucket" "tfstate" {
-  bucket = "aws-infra-tfstate-438682940251"
+  bucket = "aws-infra-tfstate-947197405729"
 }
 
 resource "aws_s3_bucket_versioning" "tfstate" {
@@ -310,7 +310,7 @@ terraform {
     }
   }
   backend "s3" {
-    bucket       = "aws-infra-tfstate-438682940251"
+    bucket       = "aws-infra-tfstate-947197405729"
     key          = "global/github-oidc/terraform.tfstate"
     region       = "ap-northeast-2"
     use_lockfile = true
@@ -381,7 +381,7 @@ terraform {
     }
   }
   backend "s3" {
-    bucket       = "aws-infra-tfstate-438682940251"
+    bucket       = "aws-infra-tfstate-947197405729"
     key          = "kkoma-slack/terraform.tfstate"
     region       = "ap-northeast-2"
     use_lockfile = true
@@ -853,7 +853,7 @@ Expected: `Apply complete! Resources: 3 added` (버킷, 버전닝, public access
 ```hcl
 terraform {
   backend "s3" {
-    bucket       = "aws-infra-tfstate-438682940251"
+    bucket       = "aws-infra-tfstate-947197405729"
     key          = "global/tf-state/terraform.tfstate"
     region       = "ap-northeast-2"
     use_lockfile = true
@@ -874,7 +874,7 @@ Expected: `Successfully configured the backend "s3"!`
 Run: `cd ~/aws-infra/global/github-oidc && terraform init && terraform apply -auto-approve`
 Expected: `Apply complete! Resources: 1 added` + `provider_arn` 출력
 
-(이미 계정에 OIDC provider가 존재하면 `EntityAlreadyExists` 에러가 난다. 그 경우 `terraform import aws_iam_openid_connect_provider.github arn:aws:iam::438682940251:oidc-provider/token.actions.githubusercontent.com` 후 재-apply.)
+(이미 계정에 OIDC provider가 존재하면 `EntityAlreadyExists` 에러가 난다. 그 경우 `terraform import aws_iam_openid_connect_provider.github arn:aws:iam::947197405729:oidc-provider/token.actions.githubusercontent.com` 후 재-apply.)
 
 - [ ] **Step 4: kkoma-slack 스택 plan 검토 후 apply**
 
