@@ -1,0 +1,60 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_REGISTRY: 438682940251.dkr.ecr.ap-northeast-2.amazonaws.com
+  ECR_REPO: kkoma-slack
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::438682940251:role/kkoma-slack-deploy
+          aws-region: ap-northeast-2
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          docker build -t "$ECR_REGISTRY/$ECR_REPO:latest" -t "$ECR_REGISTRY/$ECR_REPO:$SHORT_SHA" .
+          docker push --all-tags "$ECR_REGISTRY/$ECR_REPO"
+
+      - name: Redeploy on EC2 via SSM
+        run: |
+          CMD_ID=$(aws ssm send-command \
+            --document-name AWS-RunShellScript \
+            --targets "Key=tag:App,Values=kkoma-slack" \
+            --parameters 'commands=["/opt/kkoma/deploy.sh"]' \
+            --query Command.CommandId --output text)
+          echo "command id: $CMD_ID"
+          for i in $(seq 1 30); do
+            STATUS=$(aws ssm list-command-invocations --command-id "$CMD_ID" \
+              --query 'CommandInvocations[0].Status' --output text)
+            echo "status: $STATUS"
+            case "$STATUS" in
+              Success) exit 0 ;;
+              Failed|Cancelled|TimedOut)
+                aws ssm list-command-invocations --command-id "$CMD_ID" --details
+                exit 1 ;;
+            esac
+            sleep 5
+          done
+          echo "timed out waiting for SSM command"
+          exit 1
