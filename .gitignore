@@ -1,0 +1,14 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/*.dat
+data/near/*.dat
+data/cc.ko.300.vec
+data/cc.ko.300.vec.gz
+data/ko-aff-dic-0.7.92/
+data/ko-aff-dic-0.7.92.zip
+data/filtered_frequent_words.txt

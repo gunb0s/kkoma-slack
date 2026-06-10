@@ -1,0 +1,22 @@
+display_information:
+  name: Kkoma
+  description: Korean Semantle for Slack
+  background_color: "#155263"
+features:
+  bot_user:
+    display_name: kkoma
+    always_online: false
+  slash_commands:
+    - command: /kkoma
+      url: https://YOUR_DOMAIN.example/slack/commands
+      description: Guess today's Korean Semantle word
+      usage_hint: "start | guess word | top | status | giveup"
+      should_escape: false
+oauth_config:
+  scopes:
+    bot:
+      - commands
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

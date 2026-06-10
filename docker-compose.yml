@@ -1,0 +1,9 @@
+services:
+  kkoma-slack:
+    build: .
+    ports:
+      - "3339:3339"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
