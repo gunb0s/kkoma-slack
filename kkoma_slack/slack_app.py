@@ -47,16 +47,18 @@ class Game:
     command: str
     display_name: str
     engine: SemantleEngine
+    example_word: str = "사과"
 
 
 def help_text(game: Game) -> str:
     cmd = game.command
     name = game.display_name
+    word = game.example_word
     return "\n".join(
         [
             f"{name} Slack 사용법",
             f"`/{cmd} start` 오늘 문제 시작",
-            f"`/{cmd} 사과` 또는 `/{cmd} guess 사과` 추측",
+            f"`/{cmd} {word}` 또는 `/{cmd} guess {word}` 추측",
             f"`/{cmd} top` 현재 랭킹",
             f"`/{cmd} hint [weak|medium|strong]` 힌트 공개",
             f"`/{cmd} status` 진행 현황",
@@ -129,7 +131,7 @@ def handle_slash_command(
             store.ensure_game(game.key, team_id, channel_id, day, user_id)
             return visible(
                 f"{game.display_name} #{day} 시작! 이 채널에서 같이 오늘의 단어를 맞혀보세요.\n"
-                f"`/{game.command} 사과`처럼 바로 단어를 던지면 됩니다.",
+                f"`/{game.command} {game.example_word}`처럼 바로 단어를 던지면 됩니다.",
                 public_responses,
             )
 
@@ -151,7 +153,7 @@ def handle_slash_command(
             return visible(f"{game.display_name} #{day} 정답은 `{engine.answer(day)}` 입니다.", public_responses)
         if parsed.action == "guess":
             if not parsed.word:
-                return ephemeral(f"추측할 단어를 같이 입력해주세요. 예: `/{game.command} 사과`")
+                return ephemeral(f"추측할 단어를 같이 입력해주세요. 예: `/{game.command} {game.example_word}`")
             return handle_guess(
                 game, team_id, channel_id, user_id, user_name, day, parsed.word, store, public_responses
             )

@@ -59,6 +59,7 @@ def create_games() -> dict[str, Game]:
             key="sema",
             command="sema",
             display_name="semantle",
+            example_word="apple",
             engine=EnglishSemantleEngine(settings.en_data_dir, settings.sema_remote_base_url),
         )
     return games
