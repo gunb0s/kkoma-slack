@@ -30,6 +30,9 @@ class Settings:
     port: int = int(os.environ.get("PORT", os.environ.get("KKOMA_PORT", "3339")))
     engine_mode: str = os.environ.get("KKOMA_ENGINE_MODE", "self_hosted")
     remote_base_url: str = os.environ.get("KKOMA_REMOTE_BASE_URL", "https://semantle-ko.newsjel.ly")
+    sema_remote_base_url: str = os.environ.get("KKOMA_SEMA_REMOTE_BASE_URL", "https://legacy.semantle.com")
+    enable_sema: bool = os.environ.get("KKOMA_ENABLE_SEMA", "1") != "0"
+    en_data_dir: Path = _path_from_env("KKOMA_EN_DATA_DIR", ROOT_DIR / "data" / "en", ROOT_DIR)
     slack_signing_secret: str = os.environ.get("SLACK_SIGNING_SECRET", "")
     public_responses: bool = os.environ.get("KKOMA_PUBLIC_RESPONSES", "1") != "0"
     allow_score_only: bool = os.environ.get("KKOMA_ALLOW_SCORE_ONLY", "0") == "1"

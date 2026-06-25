@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 import hmac
 import random
@@ -9,12 +10,11 @@ from typing import Any, Protocol
 from flask import Request
 
 from .commands import parse_command
-from .semantle_engine import EngineError, MissingDataError, UnknownWordError
+from .semantle_engine import OUT_OF_RANK, EngineError, MissingDataError, UnknownWordError
 from .storage import StateStore, StoredGuess
 
 
 TOP_LIMIT = 10
-OUT_OF_RANK = "1000위 이상"
 NEAR_BUT_UNRANKED = "🔥 후보엔 없지만 가까워요"
 _cutoff_cache: dict[int, float] = {}
 HINT_RANGES = {
@@ -41,17 +41,28 @@ class SemantleEngine(Protocol):
     def top_scores(self, day: int | None = None): ...
 
 
-HELP_TEXT = "\n".join(
-    [
-        "꼬맨틀 Slack 사용법",
-        "`/kkoma start` 오늘 문제 시작",
-        "`/kkoma 사과` 또는 `/kkoma guess 사과` 추측",
-        "`/kkoma top` 현재 랭킹",
-        "`/kkoma hint [weak|medium|strong]` 힌트 공개",
-        "`/kkoma status` 진행 현황",
-        "`/kkoma giveup` 정답 공개",
-    ]
-)
+@dataclass(frozen=True)
+class Game:
+    key: str
+    command: str
+    display_name: str
+    engine: SemantleEngine
+
+
+def help_text(game: Game) -> str:
+    cmd = game.command
+    name = game.display_name
+    return "\n".join(
+        [
+            f"{name} Slack 사용법",
+            f"`/{cmd} start` 오늘 문제 시작",
+            f"`/{cmd} 사과` 또는 `/{cmd} guess 사과` 추측",
+            f"`/{cmd} top` 현재 랭킹",
+            f"`/{cmd} hint [weak|medium|strong]` 힌트 공개",
+            f"`/{cmd} status` 진행 현황",
+            f"`/{cmd} giveup` 정답 공개",
+        ]
+    )
 
 
 def ensure_signing_configured(signing_secret: str, allow_unsigned: bool) -> None:
@@ -87,10 +98,16 @@ def verify_slack_request(request: Request, signing_secret: str) -> bool:
 
 def handle_slash_command(
     form: dict[str, str],
-    engine: SemantleEngine,
+    games: dict[str, Game],
     store: StateStore,
     public_responses: bool = True,
 ) -> dict[str, Any]:
+    command = (form.get("command") or "").lstrip("/")
+    game = games.get(command)
+    if game is None:
+        game = next(iter(games.values()))
+
+    engine = game.engine
     parsed = parse_command(form.get("text", ""))
     team_id = form.get("team_id") or form.get("enterprise_id") or "unknown-team"
     channel_id = form.get("channel_id") or "unknown-channel"
@@ -100,59 +117,86 @@ def handle_slash_command(
 
     try:
         if parsed.action == "help":
-            return ephemeral(HELP_TEXT)
+            return ephemeral(help_text(game))
         if parsed.action == "start":
-            store.ensure_game(team_id, channel_id, day, user_id)
+            conflict = active_conflict(game, games, store, team_id, channel_id)
+            if conflict is not None:
+                other, other_day = conflict
+                return ephemeral(
+                    f"이 채널은 지금 {other.display_name}(#{other_day}) 진행 중이에요. "
+                    f"먼저 정답을 맞히거나 `/{other.command} giveup` 후 시작할 수 있어요."
+                )
+            store.ensure_game(game.key, team_id, channel_id, day, user_id)
             return visible(
-                f"꼬맨틀 #{day} 시작! 이 채널에서 같이 오늘의 단어를 맞혀보세요.\n"
-                "`/kkoma 사과`처럼 바로 단어를 던지면 됩니다.",
+                f"{game.display_name} #{day} 시작! 이 채널에서 같이 오늘의 단어를 맞혀보세요.\n"
+                f"`/{game.command} 사과`처럼 바로 단어를 던지면 됩니다.",
                 public_responses,
             )
+
+        if not store.has_game(game.key, team_id, channel_id, day):
+            return ephemeral(f"먼저 `/{game.command} start` 해주세요.")
+
         if parsed.action == "top":
-            total = store.guess_count(team_id, channel_id, day)
-            guesses = store.guesses(team_id, channel_id, day, limit=TOP_LIMIT)
-            return visible(format_top(guesses, day, total, rank_cutoff(engine, day)), public_responses)
+            total = store.guess_count(game.key, team_id, channel_id, day)
+            guesses = store.guesses(game.key, team_id, channel_id, day, limit=TOP_LIMIT)
+            return visible(format_top(game, guesses, day, total, rank_cutoff(engine, day)), public_responses)
         if parsed.action == "status":
-            total = store.guess_count(team_id, channel_id, day)
-            guesses = store.guesses(team_id, channel_id, day, limit=TOP_LIMIT)
-            return visible(format_status(guesses, day, total, rank_cutoff(engine, day)), public_responses)
+            total = store.guess_count(game.key, team_id, channel_id, day)
+            guesses = store.guesses(game.key, team_id, channel_id, day, limit=TOP_LIMIT)
+            return visible(format_status(game, guesses, day, total, rank_cutoff(engine, day)), public_responses)
         if parsed.action == "hint":
-            return handle_hint(team_id, channel_id, user_id, day, parsed.word, engine, store, public_responses)
+            return handle_hint(game, team_id, channel_id, user_id, day, parsed.word, store, public_responses)
         if parsed.action == "giveup":
-            store.ensure_game(team_id, channel_id, day, user_id)
-            store.reveal_answer(team_id, channel_id, day)
-            return visible(f"꼬맨틀 #{day} 정답은 `{engine.answer(day)}` 입니다.", public_responses)
+            store.reveal_answer(game.key, team_id, channel_id, day)
+            return visible(f"{game.display_name} #{day} 정답은 `{engine.answer(day)}` 입니다.", public_responses)
         if parsed.action == "guess":
             if not parsed.word:
-                return ephemeral("추측할 단어를 같이 입력해주세요. 예: `/kkoma 사과`")
+                return ephemeral(f"추측할 단어를 같이 입력해주세요. 예: `/{game.command} 사과`")
             return handle_guess(
-                team_id, channel_id, user_id, user_name, day, parsed.word, engine, store, public_responses
+                game, team_id, channel_id, user_id, user_name, day, parsed.word, store, public_responses
             )
     except MissingDataError as exc:
         return ephemeral(f"엔진 데이터가 아직 준비되지 않았습니다.\n```{exc}```")
     except UnknownWordError:
-        return ephemeral(f"`{parsed.word}`는 꼬맨틀 사전에 없는 단어입니다.")
+        return ephemeral(f"`{parsed.word}`는 {game.display_name} 사전에 없는 단어입니다.")
     except EngineError as exc:
-        return ephemeral(f"꼬맨틀 엔진 오류가 발생했습니다.\n```{exc}```")
+        return ephemeral(f"{game.display_name} 엔진 오류가 발생했습니다.\n```{exc}```")
 
-    return ephemeral(HELP_TEXT)
+    return ephemeral(help_text(game))
+
+
+def active_conflict(
+    game: Game,
+    games: dict[str, Game],
+    store: StateStore,
+    team_id: str,
+    channel_id: str,
+) -> tuple[Game, int] | None:
+    for other in games.values():
+        if other.key == game.key:
+            continue
+        other_day = other.engine.today()
+        if store.is_active(other.key, team_id, channel_id, other_day):
+            return other, other_day
+    return None
 
 
 def handle_guess(
+    game: Game,
     team_id: str,
     channel_id: str,
     user_id: str,
     user_name: str,
     day: int,
     word: str,
-    engine: SemantleEngine,
     store: StateStore,
     public_responses: bool,
 ) -> dict[str, Any]:
-    store.ensure_game(team_id, channel_id, day, user_id)
-    duplicate = store.duplicate_guess(team_id, channel_id, day, word)
+    engine = game.engine
+    duplicate = store.duplicate_guess(game.key, team_id, channel_id, day, word)
     result = engine.guess(word, day)
     inserted = store.record_guess(
+        game.key,
         team_id,
         channel_id,
         day,
@@ -163,11 +207,11 @@ def handle_guess(
         result.rank,
         result.is_answer,
     )
-    count = store.guess_count(team_id, channel_id, day)
-    top_guesses = store.guesses(team_id, channel_id, day, limit=TOP_LIMIT)
+    count = store.guess_count(game.key, team_id, channel_id, day)
+    top_guesses = store.guesses(game.key, team_id, channel_id, day, limit=TOP_LIMIT)
 
     if result.is_answer:
-        text = format_solved(user_id, result.guess, count)
+        text = format_solved(game, user_id, result.guess, count)
     else:
         cutoff = rank_cutoff(engine, day)
         if not inserted and duplicate is not None:
@@ -181,42 +225,44 @@ def handle_guess(
                 f"*{display_name_for(user_name, user_id)}* `{result.guess}` → "
                 f"유사도 {format_similarity(result.similarity)}, "
                 f"{format_rank(result.rank, result.similarity, cutoff)}\n"
-                f"{format_top(top_guesses, day, count, cutoff)}"
+                f"{format_top(game, top_guesses, day, count, cutoff)}"
             )
 
     return visible(text, public_responses)
 
 
-def format_solved(user_id: str, word: str, count: int) -> str:
+def format_solved(game: Game, user_id: str, word: str, count: int) -> str:
     return (
         f":tada::tada: *정답입니다!* :tada::tada:\n"
         f"<@{user_id}>님이 마침내 `{word}`를 찾아냈어요! :clap:\n"
-        f"무려 {count}번의 도전 끝에 오늘의 꼬맨틀을 정복했습니다. :trophy: 축하해요! :partying_face:"
+        f"무려 {count}번의 도전 끝에 오늘의 {game.display_name}을 정복했습니다. :trophy: 축하해요! :partying_face:"
     )
 
 
 def handle_hint(
+    game: Game,
     team_id: str,
     channel_id: str,
     user_id: str,
     day: int,
     requested_level: str,
-    engine: SemantleEngine,
     store: StateStore,
     public_responses: bool,
 ) -> dict[str, Any]:
     level = normalize_hint_level(requested_level)
     if level is None:
-        return ephemeral("힌트는 `weak`, `medium`, `strong` 중 하나로 요청해주세요. 예: `/kkoma hint medium`")
+        return ephemeral(
+            f"힌트는 `weak`, `medium`, `strong` 중 하나로 요청해주세요. 예: `/{game.command} hint medium`"
+        )
 
-    store.ensure_game(team_id, channel_id, day, user_id)
-    stored = store.hint(team_id, channel_id, day, level)
+    stored = store.hint(game.key, team_id, channel_id, day, level)
     if stored is None:
-        candidates = [score for score in engine.top_scores(day) if score.rank in HINT_RANGES[level]]
+        candidates = [score for score in game.engine.top_scores(day) if score.rank in HINT_RANGES[level]]
         if not candidates:
             return ephemeral(f"`{level}` 힌트를 가져올 수 없습니다. 잠시 뒤 다시 시도해주세요.")
         selected = random.choice(candidates)
         stored = store.record_hint(
+            game.key,
             team_id,
             channel_id,
             day,
@@ -232,24 +278,36 @@ def handle_hint(
 
 
 def format_top(
-    guesses: list[StoredGuess], day: int, total_count: int | None = None, cutoff: float | None = None
+    game: Game,
+    guesses: list[StoredGuess],
+    day: int,
+    total_count: int | None = None,
+    cutoff: float | None = None,
 ) -> str:
     if not guesses:
-        return f"꼬맨틀 #{day}에는 아직 추측이 없습니다. `/kkoma start`로 시작해보세요."
+        return f"{game.display_name} #{day}에는 아직 추측이 없습니다. `/{game.command} start`로 시작해보세요."
     total = total_count if total_count is not None else len(guesses)
-    rows = [f"꼬맨틀 #{day} TOP {min(len(guesses), TOP_LIMIT)} · 총 {total}개 추측"]
+    rows = [f"{game.display_name} #{day} TOP {min(len(guesses), TOP_LIMIT)} · 총 {total}개 추측"]
     rows.extend(format_top_rows(guesses, cutoff))
     return "\n".join(rows)
 
 
 def format_status(
-    guesses: list[StoredGuess], day: int, total_count: int | None = None, cutoff: float | None = None
+    game: Game,
+    guesses: list[StoredGuess],
+    day: int,
+    total_count: int | None = None,
+    cutoff: float | None = None,
 ) -> str:
     if not guesses:
-        return f"꼬맨틀 #{day} 진행 전입니다. `/kkoma start`로 시작할 수 있어요."
+        return f"{game.display_name} #{day} 진행 전입니다. `/{game.command} start`로 시작할 수 있어요."
     solved = next((guess for guess in guesses if guess.is_answer), None)
-    prefix = f"꼬맨틀 #{day}은 이미 `{solved.word}`로 해결됐습니다." if solved else f"꼬맨틀 #{day} 진행 중"
-    return f"{prefix}\n{format_top(guesses, day, total_count, cutoff)}"
+    prefix = (
+        f"{game.display_name} #{day}은 이미 `{solved.word}`로 해결됐습니다."
+        if solved
+        else f"{game.display_name} #{day} 진행 중"
+    )
+    return f"{prefix}\n{format_top(game, guesses, day, total_count, cutoff)}"
 
 
 def format_top_rows(guesses: list[StoredGuess], cutoff: float | None = None) -> list[str]:

@@ -8,10 +8,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY kkoma_slack ./kkoma_slack
 COPY data/secrets.txt ./data/secrets.txt
 COPY data/frequent_words.txt ./data/frequent_words.txt
-RUN mkdir -p ./data/near
+COPY data/en/secrets.txt ./en_data/secrets.txt
+RUN mkdir -p ./data/near ./en_data/near
 
 ENV KKOMA_DATA_DIR=/app/data
 ENV KKOMA_STATE_DB=/app/data/game_state.db
+ENV KKOMA_EN_DATA_DIR=/app/en_data
 ENV PORT=3339
 EXPOSE 3339
 

@@ -12,6 +12,11 @@ features:
       description: Guess today's Korean Semantle word
       usage_hint: "start | guess word | top | status | giveup"
       should_escape: false
+    - command: /sema
+      url: https://YOUR_DOMAIN.example/slack/commands
+      description: Guess today's English Semantle word
+      usage_hint: "start | guess word | top | status | giveup"
+      should_escape: false
 oauth_config:
   scopes:
     bot:
