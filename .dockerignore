@@ -7,6 +7,7 @@ data/*.db-shm
 data/*.db-wal
 data/*.dat
 data/near/*.dat
+data/en/near/*.dat
 data/cc.ko.300.vec
 data/cc.ko.300.vec.gz
 data/ko-aff-dic-0.7.92

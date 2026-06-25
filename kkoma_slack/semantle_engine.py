@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 from datetime import date, datetime
 import json
 import pickle
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -18,6 +20,9 @@ import numpy as np
 KST = ZoneInfo("Asia/Seoul")
 FIRST_DAY = date(2022, 4, 1)
 NUM_SECRETS = 4650
+
+ANSWER_RANK = "정답!"
+OUT_OF_RANK = "1000위 이상"
 
 
 class EngineError(Exception):
@@ -84,11 +89,11 @@ class SelfHostedSemantleEngine:
             rank, similarity = nearest[word]
         else:
             similarity = self._similarity(secret, word)
-            rank = "1000위 이상"
+            rank = OUT_OF_RANK
 
         is_answer = word == secret
         if is_answer:
-            rank = "정답!"
+            rank = ANSWER_RANK
             similarity = 1.0
 
         return GuessResult(
@@ -170,7 +175,7 @@ class SelfHostedSemantleEngine:
         nearest: dict[str, tuple[Any, float]] = {}
         for idx, candidate_idx in enumerate(top_idxs[dist_sort_args]):
             nearest[str(words_array[candidate_idx])] = (idx, float(dists[candidate_idx]))
-        nearest[secret] = ("정답!", 1.0)
+        nearest[secret] = (ANSWER_RANK, 1.0)
 
         near_dir = self.data_dir / "near"
         near_dir.mkdir(parents=True, exist_ok=True)
@@ -216,12 +221,12 @@ class RemoteSemantleEngine:
         payload = self._read_json(f"/guess/{puzzle_day}/{quote(word)}")
         rank = str(payload["rank"])
         similarity = float(payload["sim"])
-        is_answer = similarity >= 0.999999 or rank == "정답!"
+        is_answer = similarity >= 0.999999 or rank == ANSWER_RANK
         return GuessResult(
             day=puzzle_day,
             guess=str(payload["guess"]),
             similarity=similarity,
-            rank="정답!" if is_answer else rank,
+            rank=ANSWER_RANK if is_answer else rank,
             is_answer=is_answer,
         )
 
@@ -250,3 +255,146 @@ class RemoteSemantleEngine:
                 return response.read().decode("utf-8").strip()
         except (HTTPError, URLError) as exc:
             raise EngineError(f"remote engine unavailable: {exc}") from exc
+
+
+EN_FIRST_DAY = date(2024, 1, 1)
+_NEARBY_CELL_RE = re.compile(r"<td>\s*([^<]*?)\s*</td>")
+
+
+class EnglishSemantleEngine:
+    def __init__(self, data_dir: Path, base_url: str = "https://legacy.semantle.com") -> None:
+        # semantle.com serves a JS app shell for /nearby_1k; legacy.semantle.com
+        # returns the server-rendered neighbor table that we parse.
+        self.data_dir = data_dir
+        self.base_url = base_url.rstrip("/")
+        self.secrets = self._load_secrets()
+        self._secret_vec_cache: dict[int, np.ndarray] = {}
+        self._nearby_cache: dict[int, list[TopScore]] = {}
+
+    def today(self) -> int:
+        current_date = datetime.now(tz=KST).date()
+        return (current_date - EN_FIRST_DAY).days % len(self.secrets)
+
+    def answer(self, day: int | None = None) -> str:
+        return self.secrets[(self.today() if day is None else day) % len(self.secrets)]
+
+    def guess(self, word: str, day: int | None = None) -> GuessResult:
+        puzzle_day = (self.today() if day is None else day) % len(self.secrets)
+        secret = self.secrets[puzzle_day]
+
+        is_answer = word == secret
+        if is_answer:
+            return GuessResult(
+                day=puzzle_day, guess=word, similarity=1.0, rank=ANSWER_RANK, is_answer=True
+            )
+
+        payload = self._model2(secret, word)
+        if payload is None:
+            raise UnknownWordError(word)
+
+        secret_vec = self._secret_vec(puzzle_day, secret)
+        word_vec = np.array(payload["vec"], dtype=float)
+        similarity = cosine_similarity(secret_vec, word_vec)
+
+        percentile = payload.get("percentile")
+        if percentile is None:
+            rank = OUT_OF_RANK
+        else:
+            rank = f"{1000 - int(percentile)}위"
+
+        return GuessResult(
+            day=puzzle_day,
+            guess=word,
+            similarity=float(similarity),
+            rank=rank,
+            is_answer=False,
+        )
+
+    def top_scores(self, day: int | None = None) -> list[TopScore]:
+        puzzle_day = (self.today() if day is None else day) % len(self.secrets)
+        if puzzle_day in self._nearby_cache:
+            return self._nearby_cache[puzzle_day]
+
+        cached = self._load_near_file(puzzle_day)
+        if cached is not None:
+            self._nearby_cache[puzzle_day] = cached
+            return cached
+
+        secret = self.secrets[puzzle_day]
+        scores = self._fetch_nearby(secret)
+        self._dump_near_file(puzzle_day, scores)
+        self._nearby_cache[puzzle_day] = scores
+        return scores
+
+    def _secret_vec(self, day: int, secret: str) -> np.ndarray:
+        if day in self._secret_vec_cache:
+            return self._secret_vec_cache[day]
+        payload = self._model2(secret, secret)
+        if payload is None:
+            raise MissingDataError(f"secret word {secret!r} not in semantle vocab")
+        vec = np.array(payload["vec"], dtype=float)
+        self._secret_vec_cache[day] = vec
+        return vec
+
+    def _model2(self, secret: str, word: str) -> dict[str, Any] | None:
+        body = self._read_remote(f"/model2/{quote(secret)}/{quote(word)}")
+        if not body.strip():
+            return None
+        return json.loads(body)
+
+    def _fetch_nearby(self, secret: str) -> list[TopScore]:
+        encoded = base64.b64encode(secret.encode("utf-8")).decode("ascii")
+        html = self._read_remote(f"/nearby_1k/{encoded}")
+        cells = _NEARBY_CELL_RE.findall(html)
+        scores: list[TopScore] = []
+        for i in range(0, len(cells) - 2, 3):
+            proximity, candidate, similarity = cells[i], cells[i + 1], cells[i + 2]
+            if not proximity.isdigit():
+                continue
+            if candidate == secret:
+                continue
+            scores.append(
+                TopScore(
+                    rank=1000 - int(proximity),
+                    word=candidate,
+                    similarity=float(similarity) / 100.0,
+                )
+            )
+        return sorted(scores, key=lambda score: score.rank)
+
+    def _load_secrets(self) -> list[str]:
+        path = self.data_dir / "secrets.txt"
+        if not path.exists():
+            raise MissingDataError(f"missing {path}")
+        secrets = [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        if not secrets:
+            raise MissingDataError(f"{path} is empty")
+        return secrets
+
+    def _near_path(self, day: int) -> Path:
+        return self.data_dir / "near" / f"{day}.dat"
+
+    def _load_near_file(self, day: int) -> list[TopScore] | None:
+        path = self._near_path(day)
+        if not path.exists():
+            return None
+        with path.open("rb") as f:
+            return pickle.load(f)
+
+    def _dump_near_file(self, day: int, scores: list[TopScore]) -> None:
+        near_dir = self.data_dir / "near"
+        near_dir.mkdir(parents=True, exist_ok=True)
+        with self._near_path(day).open("wb") as f:
+            pickle.dump(scores, f)
+
+    def _read_remote(self, path: str) -> str:
+        request = Request(f"{self.base_url}{path}", headers={"User-Agent": "kkoma-slack/1.0"})
+        try:
+            with urlopen(request, timeout=10) as response:
+                return response.read().decode("utf-8")
+        except HTTPError as exc:
+            if exc.code == 404:
+                raise UnknownWordError(path) from exc
+            raise EngineError(f"semantle.com returned HTTP {exc.code}") from exc
+        except URLError as exc:
+            raise EngineError(f"semantle.com unavailable: {exc.reason}") from exc
