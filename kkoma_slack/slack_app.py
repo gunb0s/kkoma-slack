@@ -50,6 +50,26 @@ class Game:
     example_word: str = "사과"
 
 
+WELCOME_TEXT = "\n".join(
+    [
+        "👋 꼬맨틀 / semantle 사용법",
+        "",
+        "오늘의 숨은 단어를 '의미 유사도'로 함께 맞히는 게임이에요.",
+        "• 꼬맨틀(`/kkoma`)은 한국어, semantle(`/sema`)은 영어 단어입니다.",
+        "",
+        "▶ 시작하기",
+        "1. 먼저 `/kkoma start` 또는 `/sema start` 로 게임을 시작하세요.",
+        "   (start 하기 전에는 단어를 추측할 수 없어요)",
+        "2. 한 채널에서는 꼬맨틀과 semantle을 '동시에' 진행할 수 없어요.",
+        "   하나를 맞히거나 `giveup` 한 뒤에 다른 게임을 시작할 수 있습니다.",
+        "",
+        "▶ 플레이",
+        "• `/kkoma 사과` 또는 `/sema apple` 처럼 단어를 던지면 유사도가 나와요.",
+        "• `top` 랭킹 · `hint [weak|medium|strong]` 힌트 · `status` 현황 · `giveup` 정답 공개",
+    ]
+)
+
+
 def help_text(game: Game) -> str:
     cmd = game.command
     name = game.display_name
@@ -120,6 +140,8 @@ def handle_slash_command(
     try:
         if parsed.action == "help":
             return ephemeral(help_text(game))
+        if parsed.action == "welcome":
+            return ephemeral(WELCOME_TEXT)
         if parsed.action == "start":
             conflict = active_conflict(game, games, store, team_id, channel_id)
             if conflict is not None:

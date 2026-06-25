@@ -18,6 +18,8 @@ class ParseCommandTest(unittest.TestCase):
         self.assertEqual(parse_command("시작").action, "start")
         self.assertEqual(parse_command("순위").action, "top")
         self.assertEqual(parse_command("포기").action, "giveup")
+        self.assertEqual(parse_command("welcome").action, "welcome")
+        self.assertEqual(parse_command("웰컴").action, "welcome")
 
 
 if __name__ == "__main__":

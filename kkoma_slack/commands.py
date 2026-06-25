@@ -23,6 +23,9 @@ COMMAND_ALIASES = {
     "힌트": "hint",
     "help": "help",
     "도움말": "help",
+    "welcome": "welcome",
+    "웰컴": "welcome",
+    "안내": "welcome",
 }
 
 

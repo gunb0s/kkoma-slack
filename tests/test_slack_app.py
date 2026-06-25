@@ -67,6 +67,18 @@ class SlackAppTest(unittest.TestCase):
             self.assertEqual(response["response_type"], "ephemeral")
             self.assertEqual(store.guess_count("kkoma", "T1", "C1", 10), 0)
 
+    def test_welcome_is_shared_and_ephemeral(self):
+        with TemporaryDirectory() as tmpdir:
+            games = kkoma_games()
+            store = StateStore(Path(tmpdir) / "state.db")
+            kk = dispatch(games, store, "welcome")
+            sema = dispatch(games, store, "안내")
+            self.assertEqual(kk["response_type"], "ephemeral")
+            self.assertEqual(kk["text"], sema["text"])
+            self.assertIn("start", kk["text"])
+            self.assertIn("동시에", kk["text"])
+            self.assertEqual(store.guess_count("kkoma", "T1", "C1", 10), 0)
+
     def test_guess_records_and_renders_public_response(self):
         with TemporaryDirectory() as tmpdir:
             games = kkoma_games()
